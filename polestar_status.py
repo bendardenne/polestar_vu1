@@ -1,8 +1,11 @@
+import logging
 from enum import Enum
+from os import GRND_RANDOM
 from threading import Thread
 from time import sleep
 
 import requests
+from requests import RequestException
 
 
 class ChargeState(Enum):
@@ -12,10 +15,36 @@ class ChargeState(Enum):
     ERROR = 3
 
 
+BLUE = {
+    "red": 0,
+    "green": 0,
+    "blue": 100
+}
+
+RED = {
+    "red": 100,
+    "green": 0,
+    "blue": 0
+}
+
+GREEN = {
+    "red": 0,
+    "green": 100,
+    "blue": 0
+}
+
+EMPTY = {
+    "red": 0,
+    "green": 0,
+    "blue": 0
+}
+
+
 class Blinker:
     active = False
     on = False
     state = ChargeState.IDLE
+    color = EMPTY
 
     def __init__(self, publisher, delay):
         self.publisher = publisher
@@ -23,9 +52,10 @@ class Blinker:
         self.thread = Thread(target=self.__loop, daemon=True)
         self.thread.start()
 
-    def start(self, state):
+    def start(self, state, color):
         self.active = True
         self.state = state
+        self.color = color
 
     def stop(self):
         self.active = False
@@ -38,10 +68,7 @@ class Blinker:
             self.__do_blink()
 
     def __do_blink(self):
-        if self.state == ChargeState.CHARGING:
-            self.publisher(0, 100 if self.on else 0, 0)
-        elif self.state == ChargeState.ERROR:
-            self.publisher(100 if self.on else 0, 0, 0)
+        self.publisher(self.color if self.on else EMPTY)
         self.on = not self.on
 
 
@@ -55,26 +82,37 @@ class PolestarStatusUpdater:
         self.api_key = api_key
         self.blinker = Blinker(publisher=self.__publishColor, delay=2)
 
+    def api_error(self):
+        self.blinker.start(self.state, BLUE)
+
     def publish(self, state, soc):
         self.state = state
         self.soc = soc
         self.__publishSoc()
-
+        logging.info(f"Updating status: {state}, {soc}%" )
         if self.state in [ChargeState.CHARGING, ChargeState.ERROR]:
-            self.blinker.start(self.state)
-        elif self.state == ChargeState.CHARGED :
+            self.blinker.start(self.state, GREEN if state == ChargeState.CHARGING else RED)
+        elif self.state == ChargeState.CHARGED:
             self.blinker.stop()
-            self.__publishColor(0, 100, 0)
+            self.__publishColor(GREEN)
         else:
             self.blinker.stop()
-            self.__publishColor(0, 0, 0)
+            self.__publishColor(EMPTY)
 
-    def __publishColor(self, red, green, blue):
-        params = {"key": self.api_key, "red": red, "green": green, "blue": blue}
-        response = requests.get(self.url + "/backlight", params=params)
-        print(response.json())
+    def __publishColor(self, color):
+        params = {"key": self.api_key, **color}
+        try:
+            response = requests.get(self.url + "/backlight", params=params)
+            response.raise_for_status()
+            logging.info(response.json())
+        except RequestException as e:
+            logging.error(e)
 
     def __publishSoc(self):
         params = {"key": self.api_key, "value": self.soc}
-        response = requests.get(self.url + "/set", params=params)
-        print(response.json())
+        try:
+            response = requests.get(self.url + "/set", params=params)
+            response.raise_for_status()
+            logging.info(response.json())
+        except RequestException as e:
+            logging.error(e)
