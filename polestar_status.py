@@ -80,7 +80,7 @@ class PolestarStatusUpdater:
     def __init__(self, vu_url, api_key):
         self.url = vu_url
         self.api_key = api_key
-        self.blinker = Blinker(publisher=self.__publishColor, delay=2)
+        self.blinker = Blinker(publisher=self.__publishColor, delay=1.5)
 
     def api_error(self):
         self.blinker.start(self.state, BLUE)
