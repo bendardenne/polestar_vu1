@@ -6,7 +6,7 @@ from time import sleep
 
 import requests
 from requests import RequestException
-
+import colorsys
 
 class ChargeState(Enum):
     IDLE = 0
@@ -92,15 +92,13 @@ class PolestarStatusUpdater:
         logging.info(f"Updating status: {state}, {soc}%" )
         if self.state in [ChargeState.CHARGING, ChargeState.ERROR]:
             self.blinker.start(self.state, GREEN if state == ChargeState.CHARGING else RED)
-        elif self.state == ChargeState.CHARGED:
-            self.blinker.stop()
-            self.__publishColor(GREEN)
         else:
             self.blinker.stop()
-            self.__publishColor(EMPTY)
+            self.__publishColor(self.__interpolatedColor())
 
     def __publishColor(self, color):
         params = {"key": self.api_key, **color}
+        logging.info(f"Color: {params}" )
         try:
             response = requests.get(self.url + "/backlight", params=params)
             response.raise_for_status()
@@ -116,3 +114,13 @@ class PolestarStatusUpdater:
             logging.info(response.json())
         except RequestException as e:
             logging.error(e)
+
+    def __interpolatedColor(self):
+        ratio = (int(self.soc) - 10)/80
+        ratio = max(0, ratio)
+        color = colorsys.hsv_to_rgb(0.33 * ratio, 1, 1)
+        return {
+            "red": color[0] * 100,
+            "green": color[1] * 100,
+            "blue": color[2] * 100
+        }
